@@ -1,0 +1,41 @@
+# virtual env
+.venv/
+env/
+venv/
+
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Jupyter
+.ipynb_checkpoints/
+
+# VSCode / IDE
+.vscode/
+.idea/
+
+# Data files
+data/
+data/processed/
+data/aug/         # back-translation outputs, silver sets
+*.jsonl           # if you don’t want to version intermediate JSONL
+*.csv
+
+# Hugging Face & other caches
+.cache/
+transformers_cache/
+datasets_cache/
+huggingface/
+
+# Logs & tensorboard
+runs/
+tb_logs/
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Secrets / environment
+.env
+models/

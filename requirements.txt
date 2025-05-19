@@ -1,0 +1,30 @@
+# core
+torch>=1.13.0
+transformers>=4.30.0
+accelerate
+bitsandbytes             # for 4-bit quantization
+peft>=0.3.0              # adapters & LoRA support
+datasets                 # HF datasets for data loading
+evaluate                 # HF evaluation metrics
+
+# tokenization & augmentation
+sentencepiece
+sacremoses               # back-translation prep
+deep-translator          # e.g. Google/LibreTranslate APIs
+
+# data handling & utils
+pandas
+scikit-learn             # sarcasm classifier, metrics
+tqdm
+
+# logging & monitoring
+tensorboard
+huggingface-hub
+
+# optional annotation tooling
+label-studio-sdk
+
+# style / lint (optional)
+black
+isort
+flake8
