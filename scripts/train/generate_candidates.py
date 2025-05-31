@@ -9,7 +9,7 @@ from peft import PeftModel
 # Paths
 BASE_MODEL_PATH = "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"         # your base model dir
 ADAPTERS_PATH   = "checkpoints/sft_warmup/lora_adapters"
-PAIRED_PATH     = "data/labels.jsonl"
+PAIRED_PATH     = "data/newlabels.jsonl"
 CANDIDATES_OUT  = "data/cand_sft.jsonl"
 
 # 1. Load tokenizer + model with LoRA adapters
@@ -21,17 +21,14 @@ model.to(device)
 
 # 2. Read contexts & generate
 with open(PAIRED_PATH) as fin, open(CANDIDATES_OUT, "w") as fout:
-    for line in fin:
+    for idx, line in enumerate(fin):
         ex = json.loads(line)
-        # build prompt string from dialogue up to last user turn
-        convo = ""
-        for turn in ex["dialogue"]:
-            speaker = "User" if turn["speaker"] == "user" else "Assistant"
-            convo += f"{speaker}: {turn['text']}\n"
-        convo += "Assistant:"
+        prompt = ex["prompt"]
+        preferred = ex["reply"]
         # tokenize and move inputs to device
-        inputs = tokenizer(convo, return_tensors="pt", truncation=True, max_length=512).to(device)
-        # generate one sample
+        inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+        # generate one sample from fine-tuned model
         outputs = model.generate(
             **inputs,
             max_new_tokens=128,
@@ -39,15 +36,13 @@ with open(PAIRED_PATH) as fin, open(CANDIDATES_OUT, "w") as fout:
             top_p=0.9,
             temperature=0.8
         )
-        gen_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
-        # extract only the model’s reply (after “Assistant:”)
-        reply = gen_text.split("Assistant:")[-1].strip()
+        gen_text = tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
+        # assemble DPO-style record
         cand = {
-            "id": ex["id"],
-            "dialogue": ex["dialogue"],
-            "response_model": reply,
-            "response_preferred": ex["response_preferred"],
-            "response_non_preferred": ex["response_non_preferred"]
+            "id": f"example_{idx}",
+            "prompt": prompt,
+            "response_preferred": preferred,
+            "response_non_preferred": gen_text
         }
         fout.write(json.dumps(cand, ensure_ascii=False) + "\n")
 print("✓ Candidate generations saved to", CANDIDATES_OUT)

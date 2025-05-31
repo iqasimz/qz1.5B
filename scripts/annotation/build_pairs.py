@@ -1,7 +1,7 @@
 import csv
 import json
 
-IN_CSV  = "data/annotation_tasks_labeled.csv"
+IN_CSV  = "data/annotation_tasks_labelled.csv"
 OUT_JSON = "data/preference_pairs.jsonl"
 
 with open(IN_CSV, encoding="utf-8") as fin, open(OUT_JSON, "w", encoding="utf-8") as fout:
