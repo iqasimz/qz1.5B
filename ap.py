@@ -1,7 +1,8 @@
+import os
+os.environ["STREAMLIT_WATCHER_IGNORE"] = "torch"
 import streamlit as st
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
-import os
 
 # Limit CPU threads for consistency (especially important for CPU deployment)
 torch.set_num_threads(4)
@@ -23,7 +24,7 @@ st.markdown(f"*Running on: {device_name}*")
 
 # Paths for models
 BASE_MODEL_PATH = "gpt2-medium"  # Base model from Hugging Face
-FINE_TUNED_MODEL_PATH = "models/gpt2"  # Your fine-tuned model
+FINE_TUNED_MODEL_PATH = "iqasimz/gpt2"  # Your fine-tuned model
 
 # Check if fine-tuned model exists
 if not os.path.exists(FINE_TUNED_MODEL_PATH):

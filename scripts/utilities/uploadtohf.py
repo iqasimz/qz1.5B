@@ -4,8 +4,8 @@ import sys
 from huggingface_hub import HfApi, upload_folder
 
 # --- CONFIGURE THESE ---
-LOCAL_MODEL_DIR = "models/sft_warmup_merged"   # your merged checkpoint folder
-REPO_ID         = "iqasimz/qz1.5B"         # your HF username/repo_name
+LOCAL_MODEL_DIR = "models/gpt2"   # your merged checkpoint folder
+REPO_ID         = "iqasimz/gpt2"         # your HF username/repo_name
 PRIVATE         = False                         # True to keep the repo private
 # -----------------------
 
