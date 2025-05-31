@@ -1,11 +1,28 @@
-import os
-os.environ["STREAMLIT_WATCHER_IGNORE"] = "torch,torch.*"
-import streamlit as st
-import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM
+#!/usr/bin/env python3
+"""
+Nuclear Energy AI: Base vs Fine-tuned Model Comparison
+Fixed version with PyTorch compatibility
+"""
 
-# Limit CPU threads for consistency (especially important for CPU deployment)
-torch.set_num_threads(4)
+# CRITICAL: This must be the very first thing before any other imports
+import os
+import sys
+
+# Set environment variables before any other imports
+os.environ["STREAMLIT_WATCHER_IGNORE"] = "torch,torch.*"
+os.environ["STREAMLIT_SERVER_FILE_WATCHER_TYPE"] = "none"
+
+# Only import torch after setting environment variables
+try:
+    import torch
+    # Limit CPU threads early
+    torch.set_num_threads(4)
+except ImportError as e:
+    print(f"Error importing torch: {e}")
+    sys.exit(1)
+
+import streamlit as st
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
 # Device selection - prioritize CPU since we had MPS issues during training
 if torch.cuda.is_available():
@@ -26,10 +43,10 @@ st.markdown(f"*Running on: {device_name}*")
 BASE_MODEL_PATH = "gpt2-medium"  # Base model from Hugging Face
 FINE_TUNED_MODEL_PATH = "iqasimz/gpt2"  # Your fine-tuned model
 
-# Check if fine-tuned model exists
-if not os.path.exists(FINE_TUNED_MODEL_PATH):
+# Check if fine-tuned model exists (only for local paths)
+if not FINE_TUNED_MODEL_PATH.startswith(("gpt", "microsoft", "openai")) and not os.path.exists(FINE_TUNED_MODEL_PATH):
     st.error(f"Fine-tuned model not found at {FINE_TUNED_MODEL_PATH}")
-    st.info("Please make sure your trained model is saved in the 'models/gpt2' directory")
+    st.info("Please make sure your trained model is saved in the correct directory")
     st.stop()
 
 # Load tokenizer and models
@@ -37,14 +54,14 @@ if not os.path.exists(FINE_TUNED_MODEL_PATH):
 def load_models():
     try:
         # Load base model
-        st.info("Loading base model...")
-        base_tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL_PATH, use_fast=True)
-        base_model = AutoModelForCausalLM.from_pretrained(BASE_MODEL_PATH)
+        with st.spinner("Loading base model..."):
+            base_tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL_PATH, use_fast=True)
+            base_model = AutoModelForCausalLM.from_pretrained(BASE_MODEL_PATH)
         
         # Load fine-tuned model
-        st.info("Loading fine-tuned model...")
-        fine_tuned_tokenizer = AutoTokenizer.from_pretrained(FINE_TUNED_MODEL_PATH, use_fast=True)
-        fine_tuned_model = AutoModelForCausalLM.from_pretrained(FINE_TUNED_MODEL_PATH)
+        with st.spinner("Loading fine-tuned model..."):
+            fine_tuned_tokenizer = AutoTokenizer.from_pretrained(FINE_TUNED_MODEL_PATH, use_fast=True)
+            fine_tuned_model = AutoModelForCausalLM.from_pretrained(FINE_TUNED_MODEL_PATH)
         
         # Move models to device
         base_model = base_model.to(device)
@@ -65,7 +82,7 @@ def load_models():
 base_tokenizer, base_model, fine_tuned_tokenizer, fine_tuned_model = load_models()
 
 # Generate response function
-def generate_response(model, tokenizer, prompt, max_tokens=100):
+def generate_response(model, tokenizer, prompt, max_tokens=100, temperature=0.8, top_p=0.9):
     try:
         # Prepare input
         inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
@@ -79,11 +96,12 @@ def generate_response(model, tokenizer, prompt, max_tokens=100):
                 **inputs,
                 max_new_tokens=max_tokens,
                 do_sample=True,
-                top_p=0.9,
-                temperature=0.8,
+                top_p=top_p,
+                temperature=temperature,
                 pad_token_id=tokenizer.eos_token_id,
                 repetition_penalty=1.1,
-                early_stopping=True
+                early_stopping=True,
+                no_repeat_ngram_size=2  # Prevent repetitive text
             )
         
         # Decode only the new tokens (excluding the input prompt)
@@ -130,9 +148,9 @@ else:
 if st.button("🚀 Generate Responses", type="primary"):
     if prompt.strip():
         with st.spinner("Generating responses... This may take a moment on CPU."):
-            # Generate responses
-            base_reply = generate_response(base_model, base_tokenizer, prompt, max_tokens)
-            tuned_reply = generate_response(fine_tuned_model, fine_tuned_tokenizer, prompt, max_tokens)
+            # Generate responses with current settings
+            base_reply = generate_response(base_model, base_tokenizer, prompt, max_tokens, temperature, top_p)
+            tuned_reply = generate_response(fine_tuned_model, fine_tuned_tokenizer, prompt, max_tokens, temperature, top_p)
         
         # Display results in columns
         col1, col2 = st.columns(2)
@@ -189,5 +207,6 @@ with st.expander("💡 Performance Tips"):
     **Troubleshooting:**
     - If you get memory errors, try restarting the app
     - For MPS issues on Mac, the app will fall back to CPU
-    - Make sure your fine-tuned model is in the correct directory
+    - Make sure your fine-tuned model is accessible (local path or HuggingFace)
+    - The torch watcher error is handled automatically
     """)
