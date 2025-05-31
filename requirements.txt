@@ -20,11 +20,4 @@ tqdm
 # logging & monitoring
 tensorboard
 huggingface-hub
-
-# optional annotation tooling
-label-studio-sdk
-
-# style / lint (optional)
-black
-isort
-flake8
+streamlit
