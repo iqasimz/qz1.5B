@@ -1,5 +1,5 @@
 import os
-os.environ["STREAMLIT_WATCHER_IGNORE"] = "torch"
+os.environ["STREAMLIT_WATCHER_IGNORE"] = "torch,torch.*"
 import streamlit as st
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
