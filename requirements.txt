@@ -8,7 +8,6 @@ datasets                 # HF datasets for data loading
 evaluate                 # HF evaluation metrics
 
 # tokenization & augmentation
-sentencepiece
 sacremoses               # back-translation prep
 deep-translator          # e.g. Google/LibreTranslate APIs
 
