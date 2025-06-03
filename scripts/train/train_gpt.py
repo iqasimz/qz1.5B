@@ -37,7 +37,7 @@ def main():
 
     # 2) Load tokenizer & model
     print("Loading tokenizer and model...")
-    model_name = "gpt2-medium"
+    model_name = MODEL_NAME = "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     
     # Ensure a pad token exists
@@ -113,7 +113,7 @@ def main():
 
     # 5) Training arguments - optimized for CPU
     training_args = TrainingArguments(
-        output_dir="models/gpt2",
+        output_dir="models/qz1.5B",
         overwrite_output_dir=True,
         num_train_epochs=3,
         per_device_train_batch_size=1,  # Very small batch size for CPU
@@ -159,17 +159,17 @@ def main():
         print("Training completed successfully!")
         
         print("Saving model...")
-        trainer.save_model("models/gpt2")
-        tokenizer.save_pretrained("models/gpt2")
+        trainer.save_model("models/qz1.5B")
+        tokenizer.save_pretrained("models/qz1.5B")
         print("Model saved successfully!")
         
     except Exception as e:
         print(f"Training failed with error: {e}")
         # Try to save what we have
         try:
-            model.save_pretrained("models/gpt2_partial")
-            tokenizer.save_pretrained("models/gpt2_partial")
-            print("Partial model saved to models/gpt2_partial")
+            model.save_pretrained("models/qz1.5B")
+            tokenizer.save_pretrained("models/qz1.5B")
+            print("Partial model saved to models/qz1.5B")
         except:
             print("Could not save partial model")
         raise
