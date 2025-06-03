@@ -15,7 +15,6 @@ warnings.filterwarnings("ignore", category=UserWarning, module="torch")
 
 # Import streamlit first to initialize properly
 import streamlit as st
-st.write("🔍 Debug: Streamlit imported successfully")
 
 # Configure Streamlit page
 st.set_page_config(
@@ -24,6 +23,7 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+st.write("🔍 Debug: Streamlit imported successfully")
 
 # Now import torch and other heavy libraries
 @st.cache_resource
