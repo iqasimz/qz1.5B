@@ -15,6 +15,7 @@ warnings.filterwarnings("ignore", category=UserWarning, module="torch")
 
 # Import streamlit first to initialize properly
 import streamlit as st
+st.write("🔍 Debug: Streamlit imported successfully")
 
 # Configure Streamlit page
 st.set_page_config(
@@ -28,8 +29,10 @@ st.set_page_config(
 @st.cache_resource
 def import_torch():
     """Import torch with proper error handling for Streamlit Cloud"""
+    st.write("🔍 Debug: entering import_torch()")
     try:
         import torch
+        st.write(f"🔍 Debug: torch version = {torch.__version__}")
         torch.set_num_threads(2)  # Lower for cloud environment
         return torch
     except Exception as e:
@@ -39,8 +42,10 @@ def import_torch():
 @st.cache_resource
 def import_transformers():
     """Import transformers with proper error handling"""
+    st.write("🔍 Debug: entering import_transformers()")
     try:
         from transformers import AutoTokenizer, AutoModelForCausalLM
+        st.write("🔍 Debug: transformers imported")
         return AutoTokenizer, AutoModelForCausalLM
     except Exception as e:
         st.error(f"Failed to import Transformers: {e}")
