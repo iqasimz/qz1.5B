@@ -18,7 +18,7 @@ import streamlit as st
 
 # Configure Streamlit page
 st.set_page_config(
-    page_title="Nuclear Energy AI Comparison",
+    page_title="Model Comparison",
     page_icon="🔬",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -62,7 +62,7 @@ else:
     device_name = "CPU"
 
 # Header
-st.title("🔬 Nuclear Energy AI: Base vs Fine-tuned Model Comparison")
+st.title("GPT2-medium Base vs Fine-tuned Model Comparison")
 st.markdown(f"*Running on Streamlit Cloud using: {device_name}*")
 
 # Model paths
@@ -137,7 +137,7 @@ def load_models():
 
 # Initialize models
 if 'models_loaded' not in st.session_state:
-    with st.spinner("Initializing AI models... This may take a few minutes on first load."):
+    with st.spinner("Initializing models... This may take a few minutes on first load."):
         base_tokenizer, base_model, fine_tuned_tokenizer, fine_tuned_model = load_models()
         st.session_state.models_loaded = True
         st.session_state.base_tokenizer = base_tokenizer
@@ -199,7 +199,7 @@ temperature = st.sidebar.slider("Temperature:", 0.1, 1.5, 0.8)
 top_p = st.sidebar.slider("Top-p:", 0.1, 1.0, 0.9)
 
 # Sample prompts
-st.sidebar.header("🎯 Sample Prompts")
+st.sidebar.header("Sample Prompts")
 sample_prompts = [
     "What is nuclear energy?",
     "Explain nuclear power plants",
@@ -212,7 +212,7 @@ sample_prompts = [
 selected_sample = st.sidebar.selectbox("Choose a sample:", [""] + sample_prompts)
 
 # Main interface
-st.header("💬 Ask about Nuclear Energy")
+st.header("Ask about Nuclear Energy")
 
 # Input
 if selected_sample:
@@ -221,14 +221,14 @@ else:
     prompt = st.text_area("Enter your prompt:", placeholder="What do you think about nuclear energy?", height=100)
 
 # Generate button
-if st.button("🚀 Generate Responses", type="primary"):
+if st.button("Generate Responses", type="primary"):
     if prompt.strip():
         # Show processing message
-        with st.spinner("🧠 AI models are thinking... This may take 30-60 seconds on Streamlit Cloud."):
+        with st.spinner("This may take 30-60 seconds on Streamlit Cloud."):
             col1, col2 = st.columns(2)
             
             with col1:
-                st.subheader("🤖 Base GPT-2")
+                st.subheader("GPT-2")
                 with st.spinner("Generating base response..."):
                     base_reply = generate_response(
                         base_model, base_tokenizer, prompt, max_tokens, temperature, top_p
@@ -236,49 +236,15 @@ if st.button("🚀 Generate Responses", type="primary"):
                 st.text_area("Base Model Response:", value=base_reply, height=200, key="base")
                 
             with col2:
-                st.subheader("⚡ Fine-tuned Model")
+                st.subheader("Fine-tuned Model")
                 with st.spinner("Generating fine-tuned response..."):
                     tuned_reply = generate_response(
                         fine_tuned_model, fine_tuned_tokenizer, prompt, max_tokens, temperature, top_p
                     )
                 st.text_area("Fine-tuned Response:", value=tuned_reply, height=200, key="tuned")
         
-        # Analysis
-        st.header("📊 Comparison Analysis")
-        st.markdown("""
-        **Look for these differences:**
-        - **Tone & Style**: Is the fine-tuned model more direct or sarcastic?
-        - **Nuclear Knowledge**: Does it show deeper technical understanding?
-        - **Response Quality**: Which provides more accurate information?
-        """)
-        
     else:
         st.warning("⚠️ Please enter a prompt first!")
-
-# Footer
-st.markdown("---")
-col1, col2 = st.columns(2)
-
-with col1:
-    st.markdown("**🤖 Base Model**")
-    st.markdown("• GPT-2 Medium (355M params)")
-    st.markdown("• General knowledge")
-
-with col2:
-    st.markdown("**⚡ Fine-tuned Model**")
-    st.markdown("• Specialized for nuclear topics")
-    st.markdown("• Custom trained dataset")
-
-# Cloud-specific tips
-with st.expander("☁️ Streamlit Cloud Tips"):
-    st.markdown("""
-    **For optimal performance:**
-    - First load takes 2-3 minutes (models are downloading)
-    - Responses take 30-60 seconds to generate
-    - Keep max tokens below 150 to avoid memory issues
-    - Refresh page if you encounter memory errors
-    - The torch warning messages are harmless and can be ignored
-    """)
 
 # Status indicator
 if st.session_state.get('models_loaded', False):
