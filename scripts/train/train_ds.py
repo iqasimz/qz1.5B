@@ -1,301 +1,345 @@
 #!/usr/bin/env python3
-# train_lora.py
-# LoRA fine-tuning script with PEFT (Parameter Efficient Fine-Tuning)
+"""
+Memory-efficient training script for DeepSeek on CPU
+Optimized for low memory usage
+"""
 
 import os
-import torch
+import gc
 import json
-from datasets import Dataset
+import torch
+import torch.nn as nn
 from transformers import (
-    AutoTokenizer,
-    AutoModelForCausalLM,
-    Trainer,
+    AutoTokenizer, 
+    AutoModelForCausalLM, 
+    Qwen2ForCausalLM,
+    Trainer, 
     TrainingArguments,
-    DataCollatorForLanguageModeling
+    TrainerCallback
 )
-from peft import (
-    LoraConfig,
-    get_peft_model,
-    TaskType,
-    prepare_model_for_kbit_training
-)
-from typing import Dict, List
+from datasets import load_dataset
+import logging
+from peft import LoraConfig, get_peft_model, TaskType
 
-def load_and_validate_dataset(file_path: str) -> List[Dict]:
-    """Load and validate the training dataset"""
-    print(f"Loading dataset from {file_path}...")
-    
-    data = []
-    with open(file_path, 'r', encoding='utf-8') as f:
-        for line_num, line in enumerate(f, 1):
-            try:
-                item = json.loads(line.strip())
-                
-                # Validate required fields
-                if "prompt" not in item or "reply" not in item:
-                    print(f"Warning: Line {line_num} missing prompt or reply")
-                    continue
-                
-                # Validate content
-                if not item["prompt"].strip() or not item["reply"].strip():
-                    print(f"Warning: Line {line_num} has empty prompt or reply")
-                    continue
-                
-                data.append({
-                    "prompt": item["prompt"].strip(),
-                    "reply": item["reply"].strip()
-                })
-                
-            except json.JSONDecodeError:
-                print(f"Warning: Line {line_num} is not valid JSON")
-                continue
-    
-    print(f"Loaded {len(data)} valid examples")
-    return data
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-def create_training_text(prompt: str, reply: str, tokenizer) -> str:
-    """Create properly formatted training text"""
-    return f"Human: {prompt}\n\nAssistant: {reply}{tokenizer.eos_token}"
+# Force garbage collection
+gc.collect()
 
-def print_trainable_parameters(model):
-    """Print the number of trainable parameters"""
-    trainable_params = 0
-    all_param = 0
-    for _, param in model.named_parameters():
-        all_param += param.numel()
-        if param.requires_grad:
-            trainable_params += param.numel()
-    print(f"Trainable params: {trainable_params:,} || All params: {all_param:,} || Trainable%: {100 * trainable_params / all_param:.2f}")
+class MemoryCallback(TrainerCallback):
+    """Monitor memory usage"""
+    def on_step_end(self, args, state, control, **kwargs):
+        if state.global_step % 10 == 0:
+            gc.collect()
+            torch.cuda.empty_cache() if torch.cuda.is_available() else None
+        return control
 
-def main():
-    # Force CPU usage to avoid MPS issues on Mac
-    os.environ["CUDA_VISIBLE_DEVICES"] = ""
-    os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
-    device = torch.device("cpu")
-    print(f"Using device: {device} (forced CPU)")
+def setup_environment():
+    """Configure for minimal memory usage"""
+    # Disable MPS
+    os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '0'
+    if hasattr(torch.backends, 'mps'):
+        torch.backends.mps.is_available = lambda: False
+        torch.backends.mps.is_built = lambda: False
+
+    # Force CPU for all operations
+    torch.set_default_device('cpu')
+    torch.set_default_dtype(torch.float32)
     
-    # Set environment variables for CPU optimization
-    os.environ["OMP_NUM_THREADS"] = "4"
-    os.environ["PYTORCH_MPS_HIGH_WATERMARK_RATIO"] = "0.0"
-    torch.set_num_threads(4)
+    # Limit threads to reduce memory overhead
+    os.environ["OMP_NUM_THREADS"] = "2"
+    os.environ["MKL_NUM_THREADS"] = "2"
+    torch.set_num_threads(2)
     
-    # Disable MPS backend completely
-    torch.backends.mps.is_available = lambda: False
+    # Set memory-efficient settings
+    torch.set_grad_enabled(True)
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
     
-    # Load dataset
-    dataset_path = "data/newlabels.jsonl"
-    if not os.path.exists(dataset_path):
-        print(f"Error: Dataset file {dataset_path} not found!")
-        return
+    # Seed for reproducibility
+    torch.manual_seed(42)
     
-    raw_data = load_and_validate_dataset(dataset_path)
-    if not raw_data:
-        print("No valid training data found!")
-        return
+    logger.info("Environment configured for low memory usage")
+
+def load_model_and_tokenizer(model_name="deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"):
+    """Load model with minimal memory footprint"""
+    logger.info("Loading tokenizer...")
+    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
     
-    # Load tokenizer and model
-    print("Loading tokenizer and model...")
-    model_name = "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
+    # Ensure special tokens are recognized as single tokens
+    tokenizer.add_special_tokens({
+        "additional_special_tokens": ["<|im_start|>", "<|im_end|>"]
+    })
     
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
-        print("Set pad_token to eos_token")
     
-    # Load model with CPU-specific settings
-    model = AutoModelForCausalLM.from_pretrained(
+    logger.info("Loading model with low memory settings...")
+    model = Qwen2ForCausalLM.from_pretrained(
         model_name,
-        torch_dtype=torch.float32,  # Use float32 for CPU stability
-        device_map=None,  # Don't use auto device mapping
-        low_cpu_mem_usage=True
+        trust_remote_code=True,
+        torch_dtype=torch.float32,
+        low_cpu_mem_usage=True,  # Enable low memory mode
+        device_map=None,
+        use_cache=False,  # Disable cache for training
     )
     
-    # Explicitly move to CPU
-    model = model.to(device)
-    print(f"Model loaded on device: {next(model.parameters()).device}")
+    # Resize model embeddings to account for newly added special tokens
+    model.resize_token_embeddings(len(tokenizer))
+
+    # Initialize embeddings for new special tokens only
+    special_ids = tokenizer.convert_tokens_to_ids(tokenizer.additional_special_tokens)
+    with torch.no_grad():
+        for tok_id in special_ids:
+            nn.init.normal_(model.model.embed_tokens.weight[tok_id], mean=0.0, std=0.02)
+
+    # Move to CPU and enable gradient checkpointing
+    model = model.cpu()
+    model.gradient_checkpointing_enable()  # Trade compute for memory
     
-    # Don't use prepare_model_for_kbit_training on CPU as it's for quantization
-    print("Skipping quantization preparation for CPU training")
-    
-    # Configure LoRA for CPU training
-    lora_config = LoraConfig(
+    # Apply LoRA for efficient fine-tuning
+    peft_config = LoraConfig(
         task_type=TaskType.CAUSAL_LM,
-        r=8,  # Reduced rank for CPU efficiency
-        lora_alpha=16,  # Reduced alpha proportionally
-        target_modules=[
-            "q_proj",
-            "k_proj", 
-            "v_proj",
-            "o_proj",
-            "gate_proj",
-            "up_proj",
-            "down_proj"
-        ],  # Target modules for LoRA (attention and MLP layers)
-        lora_dropout=0.1,  # Dropout for LoRA layers
-        bias="none",  # Don't adapt bias parameters
-        use_rslora=False,  # Use RSLoRA (Rank-Stabilized LoRA)
-        modules_to_save=None,  # Additional modules to save (not LoRA adapted)
+        inference_mode=False,
+        r=16,
+        lora_alpha=32,
+        lora_dropout=0.05,
     )
+    model = get_peft_model(model, peft_config)
     
-    # Apply LoRA to the model
-    print("Applying LoRA configuration...")
-    model = get_peft_model(model, lora_config)
-    print_trainable_parameters(model)
+    logger.info(f"Model loaded with {sum(p.numel() for p in model.parameters())/1e6:.1f}M parameters")
     
-    # Prepare training data
-    print("Preparing training data...")
-    formatted_texts = []
-    for item in raw_data:
-        formatted_text = create_training_text(item["prompt"], item["reply"], tokenizer)
-        formatted_texts.append(formatted_text)
+    # Clear any unnecessary references
+    gc.collect()
     
-    dataset = Dataset.from_dict({"text": formatted_texts})
+    return model, tokenizer
+
+def create_dataset(data_path):
+    """Load full dataset"""
+    logger.info("Loading full dataset...")
     
-    # Tokenization function
+    dataset = load_dataset("json", data_files=data_path)['train']
+    
+    # Create validation split
+    dataset = dataset.train_test_split(test_size=0.1, seed=42)
+    
+    logger.info(f"Dataset: {len(dataset['train'])} train, {len(dataset['test'])} validation")
+    return dataset
+
+def tokenize_dataset(dataset, tokenizer, max_length=128):
+    """Tokenize with minimal memory usage"""
+    
     def tokenize_function(examples):
-        """Tokenize with proper padding and truncation"""
-        tokenized = tokenizer(
-            examples["text"],
-            truncation=True,
-            padding=True,
-            max_length=256,  # Shorter sequences for CPU efficiency
-            return_tensors=None
-        )
+        prompts = examples["prompt"]
+        replies = examples["reply"]
         
-        # For causal LM, labels are the same as input_ids
-        tokenized["labels"] = []
-        for input_ids in tokenized["input_ids"]:
-            labels = input_ids.copy()
-            # Replace pad token ids with -100 so they're ignored in loss
-            labels = [-100 if token_id == tokenizer.pad_token_id else token_id for token_id in labels]
-            tokenized["labels"].append(labels)
+        all_input_ids = []
+        all_attention_masks = []
+        all_labels = []
         
-        return tokenized
+        for prompt, reply in zip(prompts, replies):
+            # Format text
+            text = f"<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n{reply}<|im_end|>"
+            user_part = f"<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n"
+            
+            # Tokenize
+            full_tokens = tokenizer(text, truncation=True, max_length=max_length)
+            user_tokens = tokenizer(user_part, truncation=True, max_length=max_length)
+            
+            # Create labels
+            labels = full_tokens["input_ids"].copy()
+            labels[:len(user_tokens["input_ids"])] = [-100] * len(user_tokens["input_ids"])
+            
+            all_input_ids.append(full_tokens["input_ids"])
+            all_attention_masks.append(full_tokens["attention_mask"])
+            all_labels.append(labels)
+        
+        return {
+            "input_ids": all_input_ids,
+            "attention_mask": all_attention_masks,
+            "labels": all_labels
+        }
     
-    print("Tokenizing dataset...")
-    tokenized_dataset = dataset.map(
+    # Process in small batches to save memory
+    tokenized = dataset.map(
         tokenize_function,
         batched=True,
-        remove_columns=dataset.column_names,
-        desc="Tokenizing"
+        batch_size=8,  # Very small batch size for memory
+        remove_columns=dataset.column_names
     )
+    
+    return tokenized
+
+class EfficientDataCollator:
+    """Memory-efficient data collator"""
+    def __init__(self, pad_token_id):
+        self.pad_token_id = pad_token_id
+    
+    def __call__(self, features):
+        # Get max length in this batch
+        max_length = max(len(f["input_ids"]) for f in features)
+        
+        # Pad all sequences
+        input_ids = []
+        attention_mask = []
+        labels = []
+        
+        for f in features:
+            # Pad input_ids
+            padding_length = max_length - len(f["input_ids"])
+            input_ids.append(f["input_ids"] + [self.pad_token_id] * padding_length)
+            
+            # Pad attention_mask
+            attention_mask.append(f["attention_mask"] + [0] * padding_length)
+            
+            # Pad labels
+            labels.append(f["labels"] + [-100] * padding_length)
+        
+        return {
+            "input_ids": torch.tensor(input_ids, dtype=torch.long),
+            "attention_mask": torch.tensor(attention_mask, dtype=torch.long),
+            "labels": torch.tensor(labels, dtype=torch.long)
+        }
+
+def main():
+    # Setup
+    setup_environment()
+    
+    # Configuration
+    data_path = "data/newlabels.jsonl"
+    output_dir = "models/deepseek-finetuned-efficient"
+    
+    # Load model and tokenizer
+    model, tokenizer = load_model_and_tokenizer()
+    
+    # Load full dataset
+    dataset = create_dataset(data_path)
+    
+    # Tokenize with 128 max length
+    logger.info("Tokenizing dataset...")
+    train_dataset = tokenize_dataset(dataset["train"], tokenizer, max_length=128)
+    eval_dataset = tokenize_dataset(dataset["test"], tokenizer, max_length=128)
     
     # Data collator
-    data_collator = DataCollatorForLanguageModeling(
-        tokenizer=tokenizer,
-        mlm=False,
-        pad_to_multiple_of=None
-    )
+    data_collator = EfficientDataCollator(tokenizer.pad_token_id)
     
-    # Training arguments - optimized for LoRA
-    output_dir = "models/qzds1.5b-lora"
-    os.makedirs(output_dir, exist_ok=True)
-    
-    total_examples = len(tokenized_dataset)
-    batch_size = 1  # Small batch size for CPU
-    gradient_accumulation = 8  # Reduced for CPU efficiency
-    
+    # Training arguments for low memory with full dataset
     training_args = TrainingArguments(
         output_dir=output_dir,
         overwrite_output_dir=True,
         
-        # Training parameters
-        num_train_epochs=2,  # Fewer epochs for CPU training
-        per_device_train_batch_size=batch_size,
-        gradient_accumulation_steps=gradient_accumulation,
-        learning_rate=5e-5,  # More conservative learning rate for CPU
-        weight_decay=0.01,
-        warmup_steps=min(50, total_examples // 20),
+        # Very small batches for memory efficiency
+        per_device_train_batch_size=1,
+        per_device_eval_batch_size=1,
+        gradient_accumulation_steps=16,  # Effective batch size = 16
         
-        # Memory optimization for CPU
-        fp16=False,  # No fp16 on CPU
-        bf16=False,
-        dataloader_pin_memory=False,  # Don't pin memory on CPU
+        # Training settings
+        num_train_epochs=5,
+        learning_rate=3e-4,
+        weight_decay=0.01,
+        warmup_ratio=0.1,
+        max_grad_norm=1.0,
+        lr_scheduler_type="cosine",
+        
+        # Save memory by evaluating less frequently
+        eval_strategy="steps",
+        eval_steps=100,  # Evaluate every 100 steps
+        save_strategy="steps",
+        save_steps=100,
+        save_total_limit=2,
+        
+        # Logging
+        logging_steps=20,
+        logging_first_step=True,
+        
+        # CPU settings
+        use_cpu=True,
+        no_cuda=True,
+        dataloader_pin_memory=False,
+        fp16=True,
         dataloader_num_workers=0,
         
-        # Logging and saving
-        logging_steps=max(1, total_examples // 20),
-        save_steps=max(10, total_examples // 10),
-        save_total_limit=3,
-        
-        # Evaluation
-        eval_strategy="no",
-        
-        # Other settings
-        remove_unused_columns=False,
-        push_to_hub=False,
-        report_to=[],
-        
-        # Force CPU usage
-        use_cpu=True,
-        
-        # Optimizer
+        # Memory optimization
+        gradient_checkpointing=True,
         optim="adamw_torch",
+        adam_epsilon=1e-8,
         
-        # Save settings
-        save_safetensors=True,
+        # Disable unused features
+        push_to_hub=False,
+        hub_strategy="end",
+        load_best_model_at_end=False,
+        metric_for_best_model="eval_loss",
+        report_to="none",
+        
+        # Additional memory saving
+        remove_unused_columns=True,
+        label_names=["labels"],
     )
     
-    print(f"Training configuration:")
-    print(f"  - Total examples: {total_examples}")
-    print(f"  - Batch size: {batch_size}")
-    print(f"  - Gradient accumulation: {gradient_accumulation}")
-    print(f"  - Effective batch size: {batch_size * gradient_accumulation}")
-    print(f"  - LoRA rank: {lora_config.r}")
-    print(f"  - LoRA alpha: {lora_config.lora_alpha}")
-    
-    # Initialize trainer
+    # Create trainer
     trainer = Trainer(
         model=model,
         args=training_args,
-        train_dataset=tokenized_dataset,
-        data_collator=data_collator,
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
         tokenizer=tokenizer,
+        data_collator=data_collator,
+        callbacks=[MemoryCallback()],
     )
     
-    # Train the model
-    print("Starting LoRA training on CPU...")
+    # Train
+    logger.info("Starting training with full dataset (448 samples, 128 tokens)...")
+    logger.info("This will take a while on CPU. Monitor memory usage.")
+    
     try:
-        # Clear any cached memory
-        if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-            torch.mps.empty_cache()
+        # Clear memory before training
+        gc.collect()
         
+        # Log memory usage
+        import psutil
+        process = psutil.Process(os.getpid())
+        logger.info(f"Memory usage before training: {process.memory_info().rss / 1024 / 1024:.1f} MB")
+        
+        # Train
         trainer.train()
-        print("Training completed successfully!")
         
-        # Save the LoRA adapter
-        print("Saving LoRA adapter and tokenizer...")
+        # Save LoRA adapter and tokenizer
         model.save_pretrained(output_dir)
         tokenizer.save_pretrained(output_dir)
-        print(f"LoRA adapter saved to {output_dir}")
         
-        # Save training configuration
-        config_path = os.path.join(output_dir, "training_config.json")
-        with open(config_path, 'w') as f:
-            json.dump({
-                "base_model": model_name,
-                "lora_config": {
-                    "r": lora_config.r,
-                    "lora_alpha": lora_config.lora_alpha,
-                    "target_modules": lora_config.target_modules,
-                    "lora_dropout": lora_config.lora_dropout,
-                },
-                "training_examples": total_examples,
-                "epochs": training_args.num_train_epochs,
-                "learning_rate": training_args.learning_rate,
-            }, indent=2)
-        print(f"Training configuration saved to {config_path}")
+        logger.info(f"Training complete! Model saved to {output_dir}")
         
-    except Exception as e:
-        print(f"Training failed: {e}")
-        # Save partial adapter
+    except MemoryError:
+        logger.error("Out of memory! Try these solutions:")
+        logger.error("1. Close other applications")
+        logger.error("2. Reduce gradient_accumulation_steps to 8")
+        logger.error("3. Enable swap memory on your system")
+        logger.error("4. Use a cloud instance with more RAM")
+        
+        # Emergency save
         try:
-            model.save_pretrained(output_dir)
-            tokenizer.save_pretrained(output_dir)
-            print(f"Partial LoRA adapter saved to {output_dir}")
-        except Exception as save_error:
-            print(f"Could not save adapter: {save_error}")
+            model.save_pretrained(f"{output_dir}_emergency")
+            tokenizer.save_pretrained(f"{output_dir}_emergency")
+            logger.info("Emergency save completed")
+        except:
+            pass
+            
+    except Exception as e:
+        logger.error(f"Training failed: {e}")
+        # Try to save what we have
+        try:
+            model.save_pretrained(f"{output_dir}_emergency")
+            tokenizer.save_pretrained(f"{output_dir}_emergency")
+            logger.info("Emergency save completed")
+        except:
+            pass
         raise
+    
+    finally:
+        # Clean up
+        gc.collect()
 
 if __name__ == "__main__":
     main()

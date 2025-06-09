@@ -37,7 +37,7 @@ def main():
 
     # 2) Load tokenizer & model
     print("Loading tokenizer and model...")
-    model_name = MODEL_NAME = "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
+    model_name = MODEL_NAME = "gpt2-medium"  # Use a smaller model for CPU training
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     
     # Ensure a pad token exists

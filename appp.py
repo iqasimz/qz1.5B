@@ -1,64 +1,67 @@
 import streamlit as st
 import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer, Qwen2ForCausalLM
 from peft import PeftModel
 
-# Configure Streamlit page
-st.set_page_config(page_title="QZDS Assistant", layout="centered")
-
-# Load model and tokenizer (only once)
-@st.cache_resource
+# Cache loading of tokenizer and LoRA adapter
 def load_model():
-    base_model_path = "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
-    lora_adapter_path = "models/qzds1.5b-lora"
-    
-    tokenizer = AutoTokenizer.from_pretrained(base_model_path)
-    base_model = AutoModelForCausalLM.from_pretrained(base_model_path, torch_dtype=torch.float32)
-    model = PeftModel.from_pretrained(base_model, lora_adapter_path)
-    model.to("cpu")
+    # Load tokenizer (includes special tokens)
+    tokenizer = AutoTokenizer.from_pretrained(
+        "models/deepseek-finetuned-efficient", trust_remote_code=True
+    )
+    # Ensure special tokens
+    tokenizer.add_special_tokens({"additional_special_tokens": ["<|im_start|>", "<|im_end|>"]})
+
+    # Load base model from original hub
+    base_model = Qwen2ForCausalLM.from_pretrained(
+        "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B",
+        trust_remote_code=True,
+        torch_dtype=torch.float32,
+        low_cpu_mem_usage=True,
+        device_map=None,
+        use_cache=True
+    )
+
+    # Resize base model embeddings to match our tokenizer
+    base_model.resize_token_embeddings(len(tokenizer))
+
+    # Load LoRA adapter on top of the resized base model
+    model = PeftModel.from_pretrained(
+        base_model,
+        "iqasimz/deepseek-finetuned-efficient",
+        is_trainable=False,
+    )
+    model.eval()
+
     return tokenizer, model
 
-tokenizer, model = load_model()
+@st.cache_resource
+def get_resources():
+    return load_model()
 
-# Define response generation
-def generate_response(prompt, max_length=64, temperature=0.7, top_p=0.95):
-    input_text = f"Human: {prompt}\n\nAssistant:"
-    input_ids = tokenizer.encode(input_text, return_tensors="pt")
-    
-    model.eval()
-    with torch.no_grad():
-        try:
-            outputs = model.generate(
-                input_ids,
-                max_new_tokens=max_length,
-                temperature=temperature,
-                top_p=top_p,
-                do_sample=True,
-                pad_token_id=tokenizer.eos_token_id,
-                eos_token_id=tokenizer.eos_token_id
-            )
-        except RuntimeError:
-            # Fallback to greedy decoding if sampling fails
-            outputs = model.generate(
-                input_ids,
-                max_new_tokens=max_length,
-                do_sample=False,
-                pad_token_id=tokenizer.eos_token_id,
-                eos_token_id=tokenizer.eos_token_id
-            )
-        
-    output_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    return output_text.split("Assistant:")[-1].strip()
+tokenizer, model = get_resources()
 
-# Streamlit UI
-st.title("🧠 QZDS Assistant (Fine-Tuned)")
-user_input = st.text_area("Enter your prompt:", height=120)
+st.title("DeepSeek LoRA Inference")
+
+user_input = st.text_area("Enter your prompt:")
 
 if st.button("Generate Reply"):
-    if user_input.strip():
-        with st.spinner("Generating response..."):
-            response = generate_response(user_input.strip())
-            st.markdown("**Assistant:**")
-            st.success(response)
+    if not user_input.strip():
+        st.warning("Please enter a prompt to generate a reply.")
     else:
-        st.warning("Please enter a prompt to get a response.")
+        formatted = f"<|im_start|>user\n{user_input}<|im_end|>\n<|im_start|>assistant\n"
+        inputs = tokenizer(formatted, return_tensors="pt")
+        with st.spinner("Generating..."):
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=128,
+                do_sample=True,
+                temperature=0.2,
+                top_k=50,
+                top_p=0.9,
+                eos_token_id=tokenizer.eos_token_id,
+                pad_token_id=tokenizer.eos_token_id,
+            )
+        generated = outputs[0][inputs.input_ids.shape[-1]:]
+        reply = tokenizer.decode(generated, skip_special_tokens=True)
+        st.write(reply)

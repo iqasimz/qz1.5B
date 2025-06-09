@@ -4,7 +4,7 @@ import sys
 from huggingface_hub import HfApi, upload_folder
 
 # --- CONFIGURE THESE ---
-LOCAL_MODEL_DIR = "models/qz1.5B"   # your merged checkpoint folder
+LOCAL_MODEL_DIR = "models/deepseek-finetuned-efficient"   # your merged checkpoint folder
 REPO_ID         = "iqasimz/qz1.5B"         # your HF username/repo_name
 PRIVATE         = False                         # True to keep the repo private
 # -----------------------
