@@ -7,7 +7,7 @@ from peft import PeftModel
 def load_model():
     # Load tokenizer (includes special tokens)
     tokenizer = AutoTokenizer.from_pretrained(
-        "models/deepseek-finetuned-efficient", trust_remote_code=True
+        "iqasimz/deepseek-finetuned-efficient", trust_remote_code=True
     )
     # Ensure special tokens
     tokenizer.add_special_tokens({"additional_special_tokens": ["<|im_start|>", "<|im_end|>"]})
