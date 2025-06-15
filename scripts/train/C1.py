@@ -1,3 +1,12 @@
+import os
+import sys
+import warnings
+
+# Suppress torch warnings and set environment variables early
+os.environ["STREAMLIT_WATCHER_IGNORE"] = "torch,torch.*"
+os.environ["STREAMLIT_SERVER_FILE_WATCHER_TYPE"] = "none"
+warnings.filterwarnings("ignore", category=UserWarning, module="torch")
+
 import streamlit as st
 import torch
 import json
@@ -90,31 +99,66 @@ def create_argument_graph(json_data):
             connections = len(list(G.neighbors(node))) + len(list(G.predecessors(node)))
             node_sizes.append(max(20, connections * 5))
         
-        # Create edge traces
-        edge_x = []
-        edge_y = []
-        edge_info = []
+        # Create edge traces with arrows and labels
+        edge_traces = []
         
         for edge in G.edges():
             x0, y0 = pos[edge[0]]
             x1, y1 = pos[edge[1]]
-            edge_x.extend([x0, x1, None])
-            edge_y.extend([y0, y1, None])
             
             relation_type = G.edges[edge]['relation_type']
-            edge_info.append(f"{edge[0]} → {edge[1]}: {relation_type}")
+            
+            # Calculate arrow position (closer to target node)
+            arrow_x = x1 - 0.1 * (x1 - x0)
+            arrow_y = y1 - 0.1 * (y1 - y0)
+            
+            # Add edge line
+            edge_traces.append(go.Scatter(
+                x=[x0, x1, None],
+                y=[y0, y1, None],
+                mode='lines',
+                line=dict(width=2, color='#7f8c8d'),
+                hoverinfo='none',
+                showlegend=False
+            ))
+            
+            # Add arrow annotation
+            edge_traces.append(go.Scatter(
+                x=[arrow_x],
+                y=[arrow_y],
+                mode='markers',
+                marker=dict(
+                    symbol='triangle-up',
+                    size=10,
+                    color='#7f8c8d',
+                    angle=np.degrees(np.arctan2(y1-y0, x1-x0))
+                ),
+                hoverinfo='none',
+                showlegend=False
+            ))
+            
+            # Add relation label at midpoint
+            mid_x = (x0 + x1) / 2
+            mid_y = (y0 + y1) / 2
+            
+            edge_traces.append(go.Scatter(
+                x=[mid_x],
+                y=[mid_y],
+                mode='text',
+                text=[relation_type.replace('_', ' ')],
+                textfont=dict(size=10, color='#2c3e50'),
+                textposition="middle center",
+                hoverinfo='text',
+                hovertext=f"{edge[0]} → {edge[1]}: {relation_type}",
+                showlegend=False
+            ))
         
         # Create plotly figure
         fig = go.Figure()
         
-        # Add edges
-        fig.add_trace(go.Scatter(
-            x=edge_x, y=edge_y,
-            line=dict(width=2, color='#7f8c8d'),
-            hoverinfo='none',
-            mode='lines',
-            name='Relations'
-        ))
+        # Add all edge traces
+        for trace in edge_traces:
+            fig.add_trace(trace)
         
         # Add nodes
         fig.add_trace(go.Scatter(
@@ -166,50 +210,24 @@ def create_argument_graph(json_data):
 def display_argument_analysis(data):
     """Display detailed argument analysis"""
     
-    # Create tabs for different views
-    tab1, tab2, tab3 = st.columns(3)
-    
-    with tab1:
-        st.subheader("📊 Role Distribution")
-        roles = [role['role'] for role in data['roles']]
-        role_counts = {role: roles.count(role) for role in set(roles)}
-        
-        fig_pie = px.pie(
-            values=list(role_counts.values()), 
-            names=list(role_counts.keys()),
-            color_discrete_sequence=px.colors.qualitative.Set3
-        )
-        fig_pie.update_layout(height=300)
-        st.plotly_chart(fig_pie, use_container_width=True)
-    
-    with tab2:
-        st.subheader("🎯 Stance Analysis")
-        stances = data.get('stance', [])
-        if stances:
-            stance_df = []
-            for stance in stances:
-                stance_df.append({
-                    'ID': stance['id'],
-                    'Position': stance['position'],
-                    'Strength': stance['modality'],
-                    'Target': stance['target']
-                })
-            st.dataframe(stance_df, use_container_width=True)
-        else:
-            st.info("No stance data available")
-    
-    with tab3:
-        st.subheader("🔗 Relations Summary")
-        relations = data['relations']
-        relation_types = [rel['type'] for rel in relations]
-        relation_counts = {rel_type: relation_types.count(rel_type) for rel_type in set(relation_types)}
-        
-        for rel_type, count in relation_counts.items():
-            st.metric(rel_type.replace('_', ' ').title(), count)
+    st.subheader("🎯 Stance Analysis")
+    stances = data.get('stance', [])
+    if stances:
+        stance_df = []
+        for stance in stances:
+            stance_df.append({
+                'ID': stance['id'],
+                'Position': stance['position'],
+                'Strength': stance['modality'],
+                'Target': stance['target']
+            })
+        st.dataframe(stance_df, use_container_width=True)
+    else:
+        st.info("No stance data available")
 
 # Sidebar settings
 st.sidebar.title("Settings")
-model_dir = st.sidebar.text_input("Model directory", value="models/deepseek-argumentanalyst-full")
+model_dir = st.sidebar.text_input("Model directory", value="iqasimz/deepseek-1.5B-argumentanalyst")
 max_new_tokens = st.sidebar.number_input("Max new tokens", min_value=10, max_value=1020, value=200)
 temperature = st.sidebar.slider("Temperature", min_value=0.0, max_value=1.0, value=0.1)
 
@@ -217,7 +235,6 @@ temperature = st.sidebar.slider("Temperature", min_value=0.0, max_value=1.0, val
 st.sidebar.subheader("Graph Settings")
 show_analysis = st.sidebar.checkbox("Show detailed analysis", value=True)
 show_raw_json = st.sidebar.checkbox("Show raw JSON", value=False)
-debug_mode = st.sidebar.checkbox("Debug mode", value=False)
 
 st.title("🧠 DeepSeek Argumentative Analysis")
 
@@ -232,54 +249,9 @@ except Exception as e:
 prompt = st.text_area("Enter your argument prompt:", height=150, 
                      placeholder="Enter text to analyze its argumentative structure...")
 
-# Add manual JSON input option
-st.subheader("Manual JSON Input (Optional)")
-manual_json = st.text_area("Or paste JSON directly:", height=100, 
-                          placeholder='{"edus": [...], "roles": [...], "relations": [...]}')
-
 if st.button("🚀 Generate Analysis", type="primary"):
-    if manual_json.strip():
-        # Use manual JSON input
-        json_str = manual_json.strip()
-        st.info("Using manually provided JSON")
-        
-        # Display results
-        st.subheader("📈 Argument Graph")
-        
-        # Create and display graph
-        fig, parsed_data = create_argument_graph(json_str)
-        
-        if fig and parsed_data:
-            st.plotly_chart(fig, use_container_width=True)
-            
-            if show_analysis:
-                st.subheader("📋 Detailed Analysis")
-                display_argument_analysis(parsed_data)
-            
-            # Display argument components
-            st.subheader("🎭 Argument Components")
-            
-            for i, edu in enumerate(parsed_data['edus']):
-                role = next((r['role'] for r in parsed_data['roles'] if r['id'] == i), 'Unknown')
-                
-                # Color code by role
-                if role == 'Claim':
-                    st.error(f"**{role}** (ID {i}): {edu['text']}")
-                elif role == 'Evidence':
-                    st.success(f"**{role}** (ID {i}): {edu['text']}")
-                elif role == 'Counterclaim':
-                    st.warning(f"**{role}** (ID {i}): {edu['text']}")
-                else:
-                    st.info(f"**{role}** (ID {i}): {edu['text']}")
-            
-            if show_raw_json:
-                st.subheader("🔍 Raw JSON Output")
-                st.code(json_str, language="json")
-        else:
-            st.error("Failed to parse the provided JSON.")
-            
-    elif not prompt.strip():
-        st.warning("Please enter a prompt to analyze or provide JSON directly.")
+    if not prompt.strip():
+        st.warning("Please enter a prompt to analyze.")
     else:
         with st.spinner("Analyzing argument structure..."):
             # Prepare input
@@ -375,11 +347,6 @@ if st.button("🚀 Generate Analysis", type="primary"):
                     st.stop()
             
             # Display results
-            if debug_mode:
-                st.subheader("🔧 Debug Information")
-                st.text_area("Raw Model Output", decoded, height=200)
-                st.text_area("Extracted JSON", json_str, height=200)
-            
             st.subheader("📈 Argument Graph")
             
             # Create and display graph
@@ -414,4 +381,3 @@ if st.button("🚀 Generate Analysis", type="primary"):
             
             else:
                 st.error("Failed to parse the generated JSON. Please check the model output.")
-                st.code(json_str, language="json")
