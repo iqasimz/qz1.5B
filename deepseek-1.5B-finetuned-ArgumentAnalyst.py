@@ -1,3 +1,12 @@
+import os
+import sys
+import warnings
+
+# Suppress torch warnings and set environment variables early
+os.environ["STREAMLIT_WATCHER_IGNORE"] = "torch,torch.*"
+os.environ["STREAMLIT_SERVER_FILE_WATCHER_TYPE"] = "none"
+warnings.filterwarnings("ignore", category=UserWarning, module="torch")
+
 import streamlit as st
 import torch
 import json
