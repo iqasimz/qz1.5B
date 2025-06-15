@@ -1,23 +1,23 @@
 # core
-torch==2.2.2
-transformers==4.40.0
-accelerate==0.27.2
-bitsandbytes==0.42.0
-peft==0.10.0
-datasets==2.18.0
-evaluate==0.4.1
+torch>=1.13.0
+transformers>=4.30.0
+accelerate
+bitsandbytes             # for 4-bit quantization
+peft>=0.3.0              # adapters & LoRA support
+datasets                 # HF datasets for data loading
+evaluate                 # HF evaluation metrics
 
 # tokenization & augmentation
-sacremoses==0.0.53
-deep-translator==1.11.4
+sacremoses               # back-translation prep
+deep-translator          # e.g. Google/LibreTranslate APIs
 
 # data handling & utils
-pandas==2.2.2
-scikit-learn==1.4.2
-tqdm==4.66.2
+pandas
+scikit-learn             # sarcasm classifier, metrics
+tqdm
 
 # logging & monitoring
-tensorboard==2.16.2
-huggingface-hub==0.22.2
-streamlit==1.32.2
-plotly==5.20.0
+tensorboard
+huggingface-hub
+streamlit
+plotly>=5.0.0
