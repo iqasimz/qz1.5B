@@ -28,7 +28,7 @@ def load_model():
     # Load LoRA adapter on top of the resized base model
     model = PeftModel.from_pretrained(
         base_model,
-        "iqasimz/deepseek-finetuned-efficient",
+        "models/deepseek-finetuned-efficient",
         is_trainable=False,
     )
     model.eval()
@@ -54,7 +54,7 @@ if st.button("Generate Reply"):
         with st.spinner("Generating..."):
             outputs = model.generate(
                 **inputs,
-                max_new_tokens=128,
+                max_new_tokens=64,
                 do_sample=True,
                 temperature=0.2,
                 top_k=50,
