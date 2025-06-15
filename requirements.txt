@@ -22,4 +22,5 @@ huggingface-hub
 streamlit>=1.28.0
 plotly>=5.17.0
 networkx>=2.8.0
-numpy>=1.24.0               # for graph-based metrics
+numpy>=1.24.0     
+gradio          # for graph-based metrics
