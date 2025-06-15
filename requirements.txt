@@ -20,3 +20,4 @@ tqdm
 tensorboard
 huggingface-hub
 streamlit
+plotly>=5.0.0
