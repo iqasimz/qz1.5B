@@ -2,13 +2,13 @@ import os
 import sys
 import warnings
 
-# More comprehensive environment setup to avoid torch watcher issues
+# Environment setup for Render deployment
 os.environ["STREAMLIT_WATCHER_IGNORE"] = "torch,torch.*,transformers,transformers.*"
 os.environ["STREAMLIT_SERVER_FILE_WATCHER_TYPE"] = "none"
 os.environ["STREAMLIT_SERVER_HEADLESS"] = "true"
 os.environ["STREAMLIT_BROWSER_GATHER_USAGE_STATS"] = "false"
 
-# Suppress all torch warnings
+# Suppress warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="torch")
 warnings.filterwarnings("ignore", category=FutureWarning, module="torch")
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="torch")
@@ -22,7 +22,7 @@ import plotly.express as px
 from transformers import AutoTokenizer, Qwen2ForCausalLM
 import numpy as np
 
-# Streamlit page config - must be first streamlit command
+# Streamlit page config
 st.set_page_config(
     page_title="DeepSeek Argument Analyst",
     page_icon="🧠",
@@ -30,11 +30,11 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Select device: MPS (Apple Silicon), CUDA, or CPU
-if torch.backends.mps.is_available():
-    DEVICE = torch.device("mps")
-elif torch.cuda.is_available():
+# Device selection - prioritize CPU for Render's free tier
+if torch.cuda.is_available():
     DEVICE = torch.device("cuda")
+elif torch.backends.mps.is_available():
+    DEVICE = torch.device("mps")
 else:
     DEVICE = torch.device("cpu")
 
@@ -45,26 +45,19 @@ def load_model(model_dir: str):
         with st.spinner(f"Loading tokenizer from {model_dir}..."):
             tokenizer = AutoTokenizer.from_pretrained(model_dir, trust_remote_code=True)
         
-        # Use half precision on MPS/CUDA for faster inference
-        dtype = torch.float16 if DEVICE.type in ["mps", "cuda"] else torch.float32
+        # Use CPU and float32 for Render's free tier
+        dtype = torch.float32
         
         with st.spinner(f"Loading model on {DEVICE}..."):
             model = Qwen2ForCausalLM.from_pretrained(
                 model_dir,
                 trust_remote_code=True,
                 torch_dtype=dtype,
-                device_map={"": DEVICE.type},
+                device_map="cpu",  # Force CPU for Render
                 use_cache=True,
+                low_cpu_mem_usage=True,  # Important for Render's memory limits
             )
             model.eval()
-        
-        # Optional compilation for PyTorch 2.0+
-        if hasattr(torch, "compile") and DEVICE.type != "mps":  # Skip compile on MPS
-            try:
-                with st.spinner("Compiling model for optimization..."):
-                    model = torch.compile(model)
-            except Exception as e:
-                st.warning(f"Model compilation failed, continuing without optimization: {e}")
         
         return tokenizer, model
     
@@ -78,35 +71,28 @@ def create_argument_graph(json_data):
     try:
         data = json.loads(json_data) if isinstance(json_data, str) else json_data
         
-        # Validate required fields
         if 'edus' not in data or 'relations' not in data:
             st.error("Invalid JSON structure: missing 'edus' or 'relations'")
             return None, None
         
-        # Create NetworkX graph
         G = nx.DiGraph()
         
-        # Add nodes with attributes
         for i, edu in enumerate(data['edus']):
             G.add_node(i, text=edu['text'])
         
-        # Add edges
         for relation in data['relations']:
             if 'from' in relation and 'to' in relation:
                 G.add_edge(relation['from'], relation['to'], 
                           relation_type=relation.get('type', 'unknown'))
         
-        # Create layout
         pos = nx.spring_layout(G, k=3, iterations=50, seed=42)
         
-        # Prepare node data
         node_x = []
         node_y = []
         node_text = []
         node_colors = []
         node_sizes = []
         
-        # Color mapping for roles
         role_colors = {
             'Claim': '#e74c3c',
             'Evidence': '#27ae60', 
@@ -117,7 +103,6 @@ def create_argument_graph(json_data):
             'Unknown': '#95a5a6'
         }
         
-        # Get roles for coloring
         roles_dict = {}
         if 'roles' in data:
             roles_dict = {role['id']: role['role'] for role in data['roles']}
@@ -130,7 +115,6 @@ def create_argument_graph(json_data):
             node_x.append(x)
             node_y.append(y)
             
-            # Get node text
             if node < len(data['edus']):
                 text = data['edus'][node]['text']
                 display_text = text[:60] + "..." if len(text) > 60 else text
@@ -138,15 +122,12 @@ def create_argument_graph(json_data):
             else:
                 node_text.append(f"ID {node}: [No text]")
             
-            # Color by role
             role = roles_dict.get(node, 'Unknown')
             node_colors.append(role_colors.get(role, '#95a5a6'))
             
-            # Size by number of connections
             connections = len(list(G.neighbors(node))) + len(list(G.predecessors(node)))
             node_sizes.append(max(20, connections * 5 + 15))
         
-        # Create edge traces
         edge_traces = []
         
         for edge in G.edges():
@@ -158,7 +139,6 @@ def create_argument_graph(json_data):
             
             relation_type = G.edges[edge].get('relation_type', 'unknown')
             
-            # Add edge line
             edge_traces.append(go.Scatter(
                 x=[x0, x1, None],
                 y=[y0, y1, None],
@@ -168,7 +148,6 @@ def create_argument_graph(json_data):
                 showlegend=False
             ))
             
-            # Add relation label at midpoint
             mid_x = (x0 + x1) / 2
             mid_y = (y0 + y1) / 2
             
@@ -184,14 +163,11 @@ def create_argument_graph(json_data):
                 showlegend=False
             ))
         
-        # Create plotly figure
         fig = go.Figure()
         
-        # Add all edge traces
         for trace in edge_traces:
             fig.add_trace(trace)
         
-        # Add nodes
         fig.add_trace(go.Scatter(
             x=node_x, y=node_y,
             mode='markers+text',
@@ -209,7 +185,6 @@ def create_argument_graph(json_data):
             name='Arguments'
         ))
         
-        # Update layout
         fig.update_layout(
             title=dict(
                 text="Argument Graph Visualization",
@@ -275,49 +250,44 @@ def display_argument_analysis(data):
 def fix_incomplete_json(json_str):
     """Attempt to fix common JSON parsing issues"""
     json_str = json_str.strip()
-    
-    # Remove any trailing commas
     json_str = json_str.replace(',}', '}').replace(',]', ']')
     
-    # If JSON doesn't end properly, try to close it
     if not json_str.endswith('}'):
-        # Count open/close braces
         open_braces = json_str.count('{')
         close_braces = json_str.count('}')
         
         if open_braces > close_braces:
-            # Add missing closing braces
             json_str += '}' * (open_braces - close_braces)
     
     return json_str
 
-# Main app
 def main():
     st.title("🧠 DeepSeek Argumentative Analysis")
     st.markdown("Analyze the argumentative structure of text using AI")
     
-    # Sidebar settings
+    # Show deployment info
+    st.info("🚀 Running on Render - Free Tier")
+    
     with st.sidebar:
         st.title("⚙️ Settings")
         
         model_dir = st.text_input(
             "Model directory", 
-            value="models/deepseek-argumentanalyst-full",
+            value="iqasimz/deepseek-1.5B-argumentanalyst",  # Smaller model for free tier
             help="HuggingFace model identifier or local path"
         )
         
         st.subheader("Generation Parameters")
-        max_new_tokens = st.number_input("Max new tokens", min_value=10, max_value=1020, value=200)
+        max_new_tokens = st.number_input("Max new tokens", min_value=10, max_value=512, value=200)
         temperature = st.slider("Temperature", min_value=0.0, max_value=1.0, value=0.1, step=0.1)
         
         st.subheader("Display Options")
         show_analysis = st.checkbox("Show detailed analysis", value=True)
         show_raw_json = st.checkbox("Show raw JSON", value=False)
         
-        # Device info
         st.info(f"🖥️ Device: {DEVICE}")
+        st.warning("⚠️ Large models may timeout on free tier")
     
-    # Load model
     if 'model_loaded' not in st.session_state:
         st.session_state.model_loaded = False
     
@@ -333,7 +303,6 @@ def main():
             st.error("❌ Failed to load model. Please check the model directory.")
             st.stop()
     
-    # Input section
     st.subheader("📝 Input Text")
     prompt = st.text_area(
         "Enter your argument prompt:", 
@@ -342,18 +311,15 @@ def main():
         help="Paste or type the text you want to analyze for arguments, claims, and evidence."
     )
     
-    # Analysis button
     if st.button("🚀 Generate Analysis", type="primary", disabled=not prompt.strip()):
         if not prompt.strip():
             st.warning("Please enter a prompt to analyze.")
         else:
             with st.spinner("🔍 Analyzing argument structure..."):
                 try:
-                    # Prepare input
                     formatted = f"<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n"
                     inputs = st.session_state.tokenizer(formatted, return_tensors="pt").to(DEVICE)
                     
-                    # Generation
                     with torch.inference_mode():
                         outputs = st.session_state.model.generate(
                             **inputs,
@@ -366,7 +332,6 @@ def main():
                     
                     decoded = st.session_state.tokenizer.decode(outputs[0], skip_special_tokens=True)
                     
-                    # Extract JSON
                     assistant_start = decoded.find('<|im_start|>assistant\n')
                     if assistant_start != -1:
                         response_text = decoded[assistant_start + len('<|im_start|>assistant\n'):]
@@ -375,7 +340,6 @@ def main():
                     
                     response_text = response_text.replace('<|im_end|>', '').strip()
                     
-                    # Find JSON boundaries
                     start_idx = response_text.find('{')
                     if start_idx == -1:
                         st.error("No JSON found in model output")
@@ -384,7 +348,6 @@ def main():
                     
                     json_str = response_text[start_idx:]
                     
-                    # Try to find the end of JSON
                     brace_count = 0
                     end_idx = len(json_str)
                     
@@ -399,7 +362,6 @@ def main():
                     
                     json_str = json_str[:end_idx]
                     
-                    # Try to parse JSON
                     try:
                         parsed_data = json.loads(json_str)
                     except json.JSONDecodeError as e:
@@ -412,10 +374,8 @@ def main():
                             st.code(json_str, language="json")
                             st.stop()
                     
-                    # Display results
                     st.success("✅ Analysis completed!")
                     
-                    # Create tabs for better organization
                     tab1, tab2, tab3 = st.tabs(["📈 Graph", "📋 Analysis", "🔍 Raw Data"])
                     
                     with tab1:
@@ -429,7 +389,6 @@ def main():
                         if show_analysis:
                             display_argument_analysis(parsed_data)
                         
-                        # Display argument components
                         st.subheader("🎭 Argument Components")
                         
                         if 'edus' in parsed_data:
@@ -440,7 +399,6 @@ def main():
                             for i, edu in enumerate(parsed_data['edus']):
                                 role = roles_dict.get(i, 'Unknown')
                                 
-                                # Color code by role
                                 if role == 'Claim':
                                     st.error(f"**{role}** (ID {i}): {edu['text']}")
                                 elif role == 'Evidence':

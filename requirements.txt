@@ -1,6 +1,6 @@
 # core
-torch>=1.13.0
-transformers>=4.30.0
+torch>=2.0.1
+transformers>=4.35.0
 accelerate
 bitsandbytes             # for 4-bit quantization
 peft>=0.3.0              # adapters & LoRA support
@@ -12,13 +12,14 @@ sacremoses               # back-translation prep
 deep-translator          # e.g. Google/LibreTranslate APIs
 
 # data handling & utils
-pandas
+pandas==2.1.3
 scikit-learn             # sarcasm classifier, metrics
 tqdm
 
 # logging & monitoring
 tensorboard
 huggingface-hub
-streamlit
-plotly>=5.0.0
-networkx               # for graph-based metrics
+streamlit>=1.28.0
+plotly>=5.17.0
+networkx>=2.8.0
+numpy>=1.24.0               # for graph-based metrics
